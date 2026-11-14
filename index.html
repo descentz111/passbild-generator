@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Passbild-Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: links die Schneidematte (Arbeitsfläche mit mm-Linealen), rechts ein schmaler Laborzettel mit vier Arbeitsschritten */
+:root{
+  --paper:#f2f3f5;      /* Seitenhintergrund, leicht kühles Grau */
+  --sheet:#ffffff;      /* Karten */
+  --ink:#16191f;        /* Text */
+  --ink-2:#5d6470;      /* Nebentext */
+  --rule:#dde0e6;       /* Linien */
+  --cobalt:#2747c9;     /* Akzent */
+  --cobalt-ink:#ffffff;
+  --mat:#23262c;        /* Schneidematte */
+  --ok:#1d7f43; --warn:#a85a00;
+  --f-display:"Space Grotesk",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Inter",ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --r:10px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#111317;--sheet:#1a1d22;--ink:#eceef2;--ink-2:#99a0ad;--rule:#2b2f37;
+    --cobalt:#7b95ff;--cobalt-ink:#0d1020;--mat:#0b0c0f;--ok:#5fcf8a;--warn:#ffb35c;color-scheme:dark}
+}
+:root[data-theme="dark"]{
+  --paper:#111317;--sheet:#1a1d22;--ink:#eceef2;--ink-2:#99a0ad;--rule:#2b2f37;
+  --cobalt:#7b95ff;--cobalt-ink:#0d1020;--mat:#0b0c0f;--ok:#5fcf8a;--warn:#ffb35c;color-scheme:dark}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.5 var(--f-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:0 28px}
+[hidden]{display:none!important}
+
+header{max-width:1400px;margin:0 auto;padding-block:20px 14px;display:flex;align-items:baseline;gap:6px 16px;flex-wrap:wrap}
+h1{font:600 22px/1.2 var(--f-display);letter-spacing:-.01em;margin:0}
+header p{margin:0;color:var(--ink-2);font-size:13px}
+
+main{max-width:1400px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 336px;gap:16px;align-items:start}
+@media (max-width:900px){main{grid-template-columns:minmax(0,1fr)}}
+
+/* Arbeitsfläche */
+#stageWrap{position:relative;background:var(--mat);border-radius:var(--r);
+  height:min(80vh,820px);min-height:440px;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+@media (max-width:900px){#stageWrap{height:66vh;min-height:360px}}
+#stage{position:absolute;inset:0;width:100%;height:100%;cursor:grab;outline:none}
+#stage.dragging{cursor:grabbing}
+#stage:focus-visible{box-shadow:inset 0 0 0 2px var(--cobalt)}
+#empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
+  padding:0 16px 22px;gap:4px;text-align:center;pointer-events:none;color:#e6e8ee}
+#empty strong{font:600 17px var(--f-display)}
+#empty span{font-size:13px;color:#a3a9b5}
+#statusBar{position:absolute;left:12px;right:12px;bottom:12px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+.pill{font:500 12px var(--f-mono);padding:4px 9px;border-radius:6px;background:rgba(10,11,14,.72);color:#dfe2e8}
+.pill.ok::before,.pill.warn::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.pill.ok::before{background:#4fd07f}
+.pill.warn::before{background:#ffad4d}
+
+#dropOverlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+  background:color-mix(in srgb,var(--cobalt) 20%,transparent);outline:3px dashed var(--cobalt);outline-offset:-14px;
+  font:600 22px var(--f-display);color:var(--ink);pointer-events:none}
+
+/* Seitenleiste */
+aside{display:flex;flex-direction:column;gap:12px;min-width:0}
+.step{background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);padding:14px 16px 16px;display:flex;flex-direction:column;gap:10px}
+.step h2{margin:0;display:flex;align-items:center;gap:10px;font:600 15px var(--f-display)}
+.step h2 .n{font:500 12px var(--f-mono);width:22px;height:22px;border-radius:50%;border:1.5px solid var(--cobalt);color:var(--cobalt);
+  display:inline-flex;align-items:center;justify-content:center}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-2)}
+.field-row{display:flex;gap:8px}
+.field-row .field{flex:1;min-width:0}
+select,input[type=number]{width:100%;font:inherit;font-size:14px;color:var(--ink);background:var(--paper);
+  border:1px solid var(--rule);border-radius:8px;padding:8px 10px}
+select:focus-visible,input:focus-visible,.btn:focus-visible{outline:2px solid var(--cobalt);outline-offset:1px}
+.slider{display:grid;grid-template-columns:52px minmax(0,1fr) 58px;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+.slider output{font:500 12px var(--f-mono);color:var(--ink);text-align:right}
+input[type=range]{width:100%;accent-color:var(--cobalt)}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+.btn{font:500 13px var(--f-body);padding:7px 11px;border-radius:8px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);cursor:pointer}
+.btn:hover:not(:disabled){border-color:var(--ink-2)}
+.btn.primary{background:var(--cobalt);border-color:var(--cobalt);color:var(--cobalt-ink);font-weight:600}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.wide{flex:1}
+.check{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer}
+.checks{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid var(--rule)}
+.legend{display:inline-block;width:14px;height:0;border-top:2px dashed;margin-left:auto}
+.hint{margin:0;font-size:12px;color:var(--ink-2);line-height:1.45}
+.hint b{color:var(--ink);font-weight:600}
+.mono{font-family:var(--f-mono)}
+#fileName{font:12px var(--f-mono);color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--rule)}
+.sub h3{margin:0;font:600 13px var(--f-body)}
+#sheetPreview{display:block;margin:2px auto 0;max-width:100%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+#sheetInfo{text-align:center;font:12px var(--f-mono);color:var(--ink-2)}
+
+#toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;
+  background:var(--ink);color:var(--paper);padding:9px 14px;border-radius:8px;font-size:14px;max-width:calc(100vw - 32px)}
+@media (prefers-reduced-motion:no-preference){#toast{animation:t .18s ease-out}@keyframes t{from{opacity:0;transform:translate(-50%,6px)}}}
+</style>
+</head>
+<body>
+<div id="dropOverlay" hidden>Bild hier loslassen</div>
+<div id="toast" role="status" hidden></div>
+
+<header>
+  <h1>Passbild-Generator</h1>
+  <p>Läuft komplett lokal im Browser. Dein Foto verlässt den Computer nicht.</p>
+</header>
+
+<main>
+  <div id="stageWrap">
+    <canvas id="stage" tabindex="0" aria-label="Bildausschnitt: ziehen zum Verschieben, Mausrad zum Zoomen"></canvas>
+    <div id="empty">
+      <strong>Foto hierher ziehen</strong>
+      <span>oder klicken, „Foto wählen…“ oder mit ⌘V / Strg+V einfügen</span>
+    </div>
+    <div id="statusBar"></div>
+  </div>
+
+  <aside>
+    <section class="step">
+      <h2><span class="n">1</span>Foto</h2>
+      <div class="btns"><button class="btn primary" id="pickBtn">Foto wählen…</button></div>
+      <input type="file" id="fileInput" accept="image/*" hidden>
+      <div id="fileName">Noch kein Foto geladen</div>
+    </section>
+
+    <section class="step">
+      <h2><span class="n">2</span>Fotogröße</h2>
+      <select id="format" aria-label="Fotogröße"></select>
+      <div class="field-row" id="custom" hidden>
+        <label class="field">Breite (mm)<input type="number" id="cw" min="10" max="300" step="1" value="35"></label>
+        <label class="field">Höhe (mm)<input type="number" id="ch" min="10" max="300" step="1" value="45"></label>
+      </div>
+      <p class="hint" id="formatInfo"></p>
+    </section>
+
+    <section class="step">
+      <h2><span class="n">3</span>Ausrichten</h2>
+      <div class="slider"><label for="zoom">Zoom</label><input type="range" id="zoom" min="-1" max="3" step="0.005" value="0"><output id="zoomVal">100 %</output></div>
+      <div class="slider"><label for="rot">Drehen</label><input type="range" id="rot" min="-20" max="20" step="0.1" value="0"><output id="rotVal">0,0°</output></div>
+      <div class="btns">
+        <button class="btn" id="fitBtn">Einpassen</button>
+        <button class="btn" id="centerBtn">Mittig setzen</button>
+        <button class="btn" id="rotResetBtn">Gerade</button>
+        <button class="btn" id="flipBtn">Spiegeln</button>
+      </div>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="gCenter" checked> Mittellinien <span class="legend" style="color:#ff5a4e"></span></label>
+        <label class="check"><input type="checkbox" id="gBio" checked> Schablone Scheitel / Kinn <span class="legend" style="color:#3ccf72"></span></label>
+        <label class="check"><input type="checkbox" id="gThirds"> Drittel-Raster</label>
+      </div>
+      <p class="hint">Ziehen verschiebt, Mausrad oder zwei Finger zoomen. Pfeiltasten verschieben um 0,1 mm, mit Shift um 1 mm. Doppelklick auf einen Regler setzt ihn zurück.</p>
+    </section>
+
+    <section class="step">
+      <h2><span class="n">4</span>Export für Fotopapier</h2>
+      <label class="field">Druckauflösung
+        <select id="dpi"><option value="300" selected>300 dpi (Fotolabor-Standard)</option><option value="600">600 dpi</option></select>
+      </label>
+
+      <div class="sub">
+        <h3>Druckbogen</h3>
+        <label class="field">Papier
+          <select id="paper">
+            <option value="102x152">10 × 15 cm (Standardabzug)</option>
+            <option value="89x127">9 × 13 cm</option>
+            <option value="127x178">13 × 18 cm</option>
+            <option value="105x148">A6</option>
+            <option value="210x297">A4</option>
+          </select>
+        </label>
+        <canvas id="sheetPreview" width="10" height="10" aria-label="Vorschau Druckbogen"></canvas>
+        <div id="sheetInfo"></div>
+        <div class="btns">
+          <button class="btn primary wide" id="dlSheet" disabled>Druckbogen als JPG</button>
+          <button class="btn" id="printSheet" disabled>Drucken…</button>
+        </div>
+      </div>
+
+      <div class="sub">
+        <h3>Einzelbild</h3>
+        <button class="btn" id="dlSingle" disabled>Einzelbild als JPG</button>
+      </div>
+
+      <p class="hint">Die JPGs tragen die Auflösung in der Datei, damit Labor und Drucker die Größe in mm treffen. Beim Bestellen „Originalgröße / ohne Beschnitt“ wählen, beim eigenen Drucker <b>100 %</b> statt „An Seite anpassen“.</p>
+    </section>
+  </aside>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+/* w,h: mm · head: Kopfhöhe Kinn bis Scheitel [min,max] · crown: Abstand Oberkante bis Scheitel [min,max] */
+const FORMATS = [
+  {group:'Ausweis, Reisepass, Visum'},
+  {id:'eu',  w:35, h:45, name:'35 × 45 mm · DE, AT, CH, EU, UK, Schengen', head:[32,36], crown:[3,5]},
+  {id:'au',  w:35, h:45, name:'35 × 45 mm · Australien, Japan, Indien (Pass)', head:[32,36], crown:[3,6]},
+  {id:'us',  w:51, h:51, name:'2 × 2 Zoll (51 × 51 mm) · USA, Indien-Visum', head:[25,35], crown:[4,9], eyesFromBottom:[28,35]},
+  {id:'cn',  w:33, h:48, name:'33 × 48 mm · China', head:[28,33], crown:[3,5]},
+  {id:'ca',  w:50, h:70, name:'50 × 70 mm · Kanada', head:[31,36], crown:[11,16]},
+  {id:'ru',  w:35, h:45, name:'35 × 45 mm · Russland', head:[30,34], crown:[4,6]},
+  {id:'my',  w:35, h:50, name:'35 × 50 mm · Malaysia', head:[30,35], crown:[5,8]},
+  {id:'ua',  w:40, h:50, name:'40 × 50 mm · Ukraine, Ägypten u. a.', head:[30,36], crown:[4,7]},
+  {id:'sq35',w:35, h:35, name:'35 × 35 mm · quadratisch'},
+  {group:'Bewerbung und Sonstiges'},
+  {id:'b4060', w:40, h:60, name:'40 × 60 mm · Bewerbungsfoto'},
+  {id:'b4560', w:45, h:60, name:'45 × 60 mm · Bewerbungsfoto groß'},
+  {id:'b5070', w:50, h:70, name:'50 × 70 mm · Bewerbungsfoto XL'},
+  {id:'b3040', w:30, h:40, name:'30 × 40 mm · Mitglieds-, Firmenausweis'},
+  {id:'b2530', w:25, h:30, name:'25 × 30 mm · klein'},
+  {id:'custom', w:35, h:45, name:'Eigene Größe…'},
+];
+
+const $ = id => document.getElementById(id);
+const stage = $('stage'), wrap = $('stageWrap'), ctx = stage.getContext('2d');
+const fmtSel = $('format');
+{
+  let og = null;
+  for (const f of FORMATS) {
+    if (f.group) { og = document.createElement('optgroup'); og.label = f.group; fmtSel.appendChild(og); continue; }
+    const o = document.createElement('option'); o.value = f.id; o.textContent = f.name; og.appendChild(o);
+  }
+}
+
+let toastTimer = 0;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3800);
+}
+
+/* ---------- Zustand ---------- */
+let img = null;
+let fmt = {...FORMATS.find(f => f.id === 'eu')};
+const st = {cx:0, cy:0, scale:1, rot:0, flip:false};  // Rahmen-mm, mm pro Bildpixel
+let fitScale = 1;
+let ppm = 1, fx = 0, fy = 0, cssW = 0, cssH = 0;
+const guides = {center:true, bio:true, thirds:false};
+
+/* ---------- Laden ---------- */
+function loadFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { toast('Das ist keine Bilddatei. Bitte JPG, PNG oder HEIC wählen.'); return; }
+  const url = URL.createObjectURL(file);
+  const im = new Image();
+  im.onload = () => {
+    img = im;
+    $('fileName').textContent = `${file.name || 'Eingefügt'} · ${im.naturalWidth} × ${im.naturalHeight} px`;
+    $('empty').hidden = true;
+    $('dlSingle').disabled = false;
+    st.rot = 0; st.flip = false;
+    fitImage();
+    stage.focus({preventScroll:true});
+  };
+  im.onerror = () => { URL.revokeObjectURL(url); toast('Dieser Browser kann das Format nicht öffnen (z. B. HEIC in Chrome). Bitte als JPG speichern.'); };
+  im.src = url;
+}
+$('pickBtn').onclick = () => $('fileInput').click();
+$('fileInput').onchange = e => { loadFile(e.target.files[0]); e.target.value = ''; };
+
+let dragDepth = 0;
+const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+window.addEventListener('dragenter', e => { if (hasFiles(e)) { e.preventDefault(); dragDepth++; $('dropOverlay').hidden = false; } });
+window.addEventListener('dragleave', e => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; $('dropOverlay').hidden = true; } });
+window.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+window.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; $('dropOverlay').hidden = true;
+  const files = [...(e.dataTransfer?.files || [])];
+  const f = files.find(f => f.type.startsWith('image/'));
+  if (f) loadFile(f); else if (files.length) toast('Bitte eine Bilddatei ablegen.');
+});
+window.addEventListener('paste', e => {
+  const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+  if (item) { e.preventDefault(); loadFile(item.getAsFile()); }
+});
+
+/* ---------- Geometrie ---------- */
+function coverScale(rot) {
+  const a = Math.abs(rot * Math.PI / 180), c = Math.cos(a), s = Math.sin(a);
+  return Math.max((fmt.w * c + fmt.h * s) / img.naturalWidth, (fmt.w * s + fmt.h * c) / img.naturalHeight);
+}
+function fitImage() {
+  if (!img) return;
+  fitScale = coverScale(0);
+  st.scale = Math.max(fitScale, coverScale(st.rot));
+  st.cx = fmt.w / 2; st.cy = fmt.h / 2;
+  syncControls(); draw();
+}
+const frameCenter = () => [fx + fmt.w * ppm / 2, fy + fmt.h * ppm / 2];
+function zoomAt(factor, px, py) {
+  if (!img) return;
+  const ns = Math.min(Math.max(st.scale * factor, fitScale * 0.25), fitScale * 12);
+  factor = ns / st.scale;
+  const mx = (px - fx) / ppm, my = (py - fy) / ppm;
+  st.cx = mx + (st.cx - mx) * factor;
+  st.cy = my + (st.cy - my) * factor;
+  st.scale = ns;
+  syncControls(); draw();
+}
+function coversFrame() {
+  const r = -st.rot * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  const hw = img.naturalWidth / 2, hh = img.naturalHeight / 2;
+  return [[0,0],[fmt.w,0],[0,fmt.h],[fmt.w,fmt.h]].every(([x, y]) => {
+    const dx = (x - st.cx) / st.scale, dy = (y - st.cy) / st.scale;
+    return Math.abs(dx * c - dy * s) <= hw + .5 && Math.abs(dx * s + dy * c) <= hh + .5;
+  });
+}
+
+/* ---------- Zeichnen ---------- */
+function paintPhoto(c, p, ox, oy) {
+  c.save();
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+  c.translate(ox + st.cx * p, oy + st.cy * p);
+  c.rotate(st.rot * Math.PI / 180);
+  if (st.flip) c.scale(-1, 1);
+  const s = st.scale * p, w = img.naturalWidth * s, h = img.naturalHeight * s;
+  c.drawImage(img, -w / 2, -h / 2, w, h);
+  c.restore();
+}
+
+function layout() {
+  const r = wrap.getBoundingClientRect();
+  cssW = r.width; cssH = r.height;
+  const dpr = window.devicePixelRatio || 1;
+  stage.width = Math.round(cssW * dpr); stage.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const padX = Math.max(44, Math.min(80, cssW * .09)), padTop = Math.max(44, Math.min(64, cssH * .08));
+  const padBot = img ? Math.max(48, Math.min(70, cssH * .09)) : Math.max(72, cssH * .14);
+  ppm = Math.min((cssW - padX * 2) / fmt.w, (cssH - padTop - padBot) / fmt.h);
+  fx = (cssW - fmt.w * ppm) / 2;
+  fy = padTop + (cssH - padTop - padBot - fmt.h * ppm) / 2;
+}
+
+let raf = 0;
+function draw() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); }); }
+
+function render() {
+  const W = fmt.w * ppm, H = fmt.h * ppm;
+  ctx.clearRect(0, 0, cssW, cssH);
+  drawMatGrid();
+  ctx.fillStyle = '#fff'; ctx.fillRect(fx, fy, W, H);
+  if (img) {
+    paintPhoto(ctx, ppm, fx, fy);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, cssW, cssH); ctx.rect(fx, fy, W, H);
+    ctx.fillStyle = 'rgba(14,15,19,.74)'; ctx.fill('evenodd');
+    ctx.restore();
+  } else {
+    drawPlaceholder(W, H);
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(fx - .75, fy - .75, W + 1.5, H + 1.5);
+  drawGuides(W, H);
+  drawRulers(W, H);
+  updateStatus();
+  scheduleSheetPreview();
+}
+
+// Schneidematte: 10-mm-Raster, an den Rahmen ausgerichtet
+function drawMatGrid() {
+  const step = 10 * ppm;
+  if (step < 14) return;
+  ctx.strokeStyle = 'rgba(255,255,255,.045)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = fx % step; x < cssW; x += step) { ctx.moveTo(Math.round(x) + .5, 0); ctx.lineTo(Math.round(x) + .5, cssH); }
+  for (let y = fy % step; y < cssH; y += step) { ctx.moveTo(0, Math.round(y) + .5); ctx.lineTo(cssW, Math.round(y) + .5); }
+  ctx.stroke();
+}
+
+// mm-Lineale oben und links am Rahmen
+function drawRulers(W, H) {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.fillStyle = 'rgba(255,255,255,.7)';
+  ctx.lineWidth = 1; ctx.font = '500 10px "IBM Plex Mono",ui-monospace,monospace';
+  const every = ppm >= 5 ? 1 : ppm >= 2 ? 5 : 10;
+  ctx.beginPath();
+  for (let mm = 0; mm <= fmt.w + 1e-6; mm += every) {
+    const x = Math.round(fx + mm * ppm) + .5, len = mm % 10 === 0 ? 9 : mm % 5 === 0 ? 6 : 3;
+    ctx.moveTo(x, fy - 4); ctx.lineTo(x, fy - 4 - len);
+  }
+  for (let mm = 0; mm <= fmt.h + 1e-6; mm += every) {
+    const y = Math.round(fy + mm * ppm) + .5, len = mm % 10 === 0 ? 9 : mm % 5 === 0 ? 6 : 3;
+    ctx.moveTo(fx - 4, y); ctx.lineTo(fx - 4 - len, y);
+  }
+  ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  for (let mm = 10; mm < fmt.w; mm += 10) ctx.fillText(mm, fx + mm * ppm, fy - 15);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let mm = 10; mm < fmt.h; mm += 10) ctx.fillText(mm, fx - 16, fy + mm * ppm);
+  ctx.fillStyle = '#fff'; ctx.font = '600 12px "IBM Plex Mono",ui-monospace,monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+  ctx.fillText(`${fmtNum(fmt.w)} × ${fmtNum(fmt.h)} mm`, fx, fy - 30 < 12 ? fy - 30 + 14 : fy - 30);
+  ctx.restore();
+}
+
+function drawPlaceholder(W, H) {
+  // Silhouette, damit die Schablone vor dem Laden lesbar ist
+  const c0 = fmt.crown ? (fmt.crown[0] + fmt.crown[1]) / 2 : fmt.h * .12;
+  const hh = fmt.head ? (fmt.head[0] + fmt.head[1]) / 2 : fmt.h * .62;
+  const cx = fx + W / 2, top = fy + c0 * ppm, headH = hh * ppm;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(fx, fy, W, H); ctx.clip();
+  ctx.fillStyle = '#e7e9ee';
+  ctx.beginPath(); ctx.ellipse(cx, top + headH * .5, headH * .37, headH * .5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx, top + headH * 1.55, headH * .95, headH * .55, 0, Math.PI, 0); ctx.fill();
+  ctx.restore();
+}
+
+function drawGuides(W, H) {
+  ctx.save();
+  ctx.beginPath(); ctx.rect(fx, fy, W, H); ctx.clip();
+  if (guides.thirds) {
+    ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i < 3; i++) {
+      ctx.moveTo(fx + W * i / 3, fy); ctx.lineTo(fx + W * i / 3, fy + H);
+      ctx.moveTo(fx, fy + H * i / 3); ctx.lineTo(fx + W, fy + H * i / 3);
+    }
+    ctx.stroke();
+  }
+  if (guides.bio && fmt.head) {
+    const [c0, c1] = fmt.crown, [h0, h1] = fmt.head;
+    const chin0 = c0 + h0, chin1 = Math.min(fmt.h, c1 + h1);
+    const band = (y0, y1, label) => {
+      ctx.fillStyle = 'rgba(60,207,114,.2)';
+      ctx.fillRect(fx, fy + y0 * ppm, W, (y1 - y0) * ppm);
+      ctx.strokeStyle = 'rgba(60,207,114,.95)'; ctx.lineWidth = 1; ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(fx, fy + y0 * ppm); ctx.lineTo(fx + W, fy + y0 * ppm);
+      ctx.moveTo(fx, fy + y1 * ppm); ctx.lineTo(fx + W, fy + y1 * ppm);
+      ctx.stroke();
+      ctx.font = '600 11px Inter,system-ui,sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,.75)'; ctx.shadowBlur = 3; ctx.fillStyle = '#fff';
+      ctx.fillText(label, fx + W - 6, fy + (y0 + y1) / 2 * ppm);
+      ctx.shadowBlur = 0;
+    };
+    band(c0, c1, 'Scheitel');
+    band(chin0, chin1, 'Kinn');
+    if (fmt.eyesFromBottom) band(fmt.h - fmt.eyesFromBottom[1], fmt.h - fmt.eyesFromBottom[0], 'Augen');
+    const top = (c0 + c1) / 2, hh = (chin0 + chin1) / 2 - top;
+    ctx.strokeStyle = 'rgba(60,207,114,.9)'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.ellipse(fx + W / 2, fy + (top + hh / 2) * ppm, hh * .37 * ppm, hh / 2 * ppm, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (guides.center) {
+    ctx.strokeStyle = 'rgba(255,90,78,.95)'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(fx + W / 2) + .5, fy); ctx.lineTo(Math.round(fx + W / 2) + .5, fy + H);
+    ctx.moveTo(fx, Math.round(fy + H / 2) + .5); ctx.lineTo(fx + W, Math.round(fy + H / 2) + .5);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function updateStatus() {
+  const bar = $('statusBar'); bar.replaceChildren();
+  if (!img) return;
+  const pill = (t, cls) => { const s = document.createElement('span'); s.className = 'pill ' + cls; s.textContent = t; bar.appendChild(s); };
+  const dpi = Math.round(25.4 / st.scale);
+  pill(dpi >= 300 ? `${dpi} dpi effektiv · scharf für Fotodruck` : `${dpi} dpi effektiv · unter 300, Druck wird weicher`, dpi >= 300 ? 'ok' : 'warn');
+  if (!coversFrame()) pill('Weißer Rand im Rahmen – Foto größer ziehen', 'warn');
+}
+const fmtNum = n => String(Math.round(n * 10) / 10).replace('.', ',');
+
+/* ---------- Regler ---------- */
+function syncControls() {
+  if (!img) return;
+  $('zoom').value = Math.log2(st.scale / fitScale);
+  $('zoomVal').textContent = Math.round(st.scale / fitScale * 100) + ' %';
+  $('rot').value = st.rot;
+  $('rotVal').textContent = st.rot.toFixed(1).replace('.', ',') + '°';
+}
+$('zoom').addEventListener('input', e => { if (img) zoomAt(fitScale * 2 ** +e.target.value / st.scale, ...frameCenter()); });
+$('zoom').addEventListener('dblclick', () => { if (img) zoomAt(fitScale / st.scale, ...frameCenter()); });
+const setRot = v => { st.rot = v; syncControls(); draw(); };
+$('rot').addEventListener('input', e => setRot(+e.target.value));
+$('rot').addEventListener('dblclick', () => setRot(0));
+$('rotResetBtn').onclick = () => setRot(0);
+$('fitBtn').onclick = fitImage;
+$('centerBtn').onclick = () => { st.cx = fmt.w / 2; draw(); };
+$('flipBtn').onclick = () => { st.flip = !st.flip; draw(); };
+$('gCenter').onchange = e => { guides.center = e.target.checked; draw(); };
+$('gBio').onchange = e => { guides.bio = e.target.checked; draw(); };
+$('gThirds').onchange = e => { guides.thirds = e.target.checked; draw(); };
+
+function setFormat(next) {
+  const old = fmt; fmt = next;
+  if (img) {
+    const k = fmt.h / old.h;
+    st.cx = fmt.w / 2 + (st.cx - old.w / 2) * k;
+    st.cy = fmt.h / 2 + (st.cy - old.h / 2) * k;
+    st.scale *= k;
+    fitScale = coverScale(0);
+    syncControls();
+  }
+  $('formatInfo').innerHTML = fmt.head
+    ? `Kopfhöhe Kinn bis Scheitel: <b class="mono">${fmt.head[0]}–${fmt.head[1]} mm</b>. Scheitel und Kinn in die grünen Bänder legen, Nase auf die rote Mittellinie. Richtwerte, maßgeblich sind die Vorgaben der Behörde.`
+    : 'Keine biometrische Vorgabe. Die Mittellinien helfen beim Ausrichten.';
+  layout(); draw();
+}
+fmtSel.addEventListener('change', () => {
+  const f = FORMATS.find(f => f.id === fmtSel.value);
+  $('custom').hidden = f.id !== 'custom';
+  setFormat(f.id === 'custom' ? {...f, w: +$('cw').value || 35, h: +$('ch').value || 45} : {...f});
+});
+['cw','ch'].forEach(id => $(id).addEventListener('input', () => {
+  const w = +$('cw').value, h = +$('ch').value;
+  if (w >= 10 && h >= 10 && w <= 300 && h <= 300) setFormat({...FORMATS.find(f => f.id === 'custom'), w, h});
+}));
+
+/* ---------- Maus und Touch ---------- */
+const pointers = new Map();
+let pinch = null;
+const localPt = e => { const r = stage.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
+stage.addEventListener('pointerdown', e => {
+  if (!img) { $('fileInput').click(); return; }
+  stage.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, localPt(e));
+  stage.classList.add('dragging');
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    pinch = {d: Math.hypot(a.x - b.x, a.y - b.y), m: {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}};
+  }
+});
+stage.addEventListener('pointermove', e => {
+  if (!pointers.has(e.pointerId)) return;
+  const prev = pointers.get(e.pointerId), cur = localPt(e);
+  pointers.set(e.pointerId, cur);
+  if (pointers.size === 1) {
+    st.cx += (cur.x - prev.x) / ppm; st.cy += (cur.y - prev.y) / ppm; draw();
+  } else if (pointers.size === 2 && pinch) {
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y), m = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
+    st.cx += (m.x - pinch.m.x) / ppm; st.cy += (m.y - pinch.m.y) / ppm;
+    zoomAt(d / pinch.d, m.x, m.y);
+    pinch = {d, m};
+  }
+});
+const endPtr = e => {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (!pointers.size) stage.classList.remove('dragging');
+};
+stage.addEventListener('pointerup', endPtr);
+stage.addEventListener('pointercancel', endPtr);
+stage.addEventListener('wheel', e => {
+  if (!img) return;
+  e.preventDefault();
+  const p = localPt(e), dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+  zoomAt(Math.exp(-dy * (e.ctrlKey ? .01 : .0018)), p.x, p.y);
+}, {passive: false});
+stage.addEventListener('keydown', e => {
+  if (!img) return;
+  const step = e.shiftKey ? 1 : .1;
+  switch (e.key) {
+    case 'ArrowLeft': st.cx -= step; break;
+    case 'ArrowRight': st.cx += step; break;
+    case 'ArrowUp': st.cy -= step; break;
+    case 'ArrowDown': st.cy += step; break;
+    case '+': case '=': zoomAt(1.03, ...frameCenter()); break;
+    case '-': zoomAt(1 / 1.03, ...frameCenter()); break;
+    default: return;
+  }
+  e.preventDefault(); draw();
+});
+new ResizeObserver(() => { layout(); draw(); }).observe(wrap);
+
+/* ---------- Export ---------- */
+function renderSingle(dpi) {
+  const p = dpi / 25.4, c = document.createElement('canvas');
+  c.width = Math.round(fmt.w * p); c.height = Math.round(fmt.h * p);
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  paintPhoto(g, c.width / fmt.w, 0, 0);
+  return c;
+}
+
+const MARGIN = 3, GAP = 2;
+function sheetLayout() {
+  const [a, b] = $('paper').value.split('x').map(Number);
+  const fit = (PW, PH) => ({PW, PH,
+    cols: Math.max(0, Math.floor((PW - 2 * MARGIN + GAP) / (fmt.w + GAP))),
+    rows: Math.max(0, Math.floor((PH - 2 * MARGIN + GAP) / (fmt.h + GAP)))});
+  const p = fit(a, b), l = fit(b, a);
+  return l.cols * l.rows > p.cols * p.rows ? l : p;
+}
+function renderSheet(p, photo) {
+  const L = sheetLayout(), c = document.createElement('canvas');
+  c.width = Math.round(L.PW * p); c.height = Math.round(L.PH * p);
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  const gw = L.cols * fmt.w + (L.cols - 1) * GAP, gh = L.rows * fmt.h + (L.rows - 1) * GAP;
+  const ox = (L.PW - gw) / 2, oy = (L.PH - gh) / 2;
+  const lw = Math.max(1, p * .1);
+  g.imageSmoothingQuality = 'high';
+  g.strokeStyle = '#b9bcc2'; g.lineWidth = lw;
+  for (let r = 0; r < L.rows; r++) for (let k = 0; k < L.cols; k++) {
+    const x = (ox + k * (fmt.w + GAP)) * p, y = (oy + r * (fmt.h + GAP)) * p, w = fmt.w * p, h = fmt.h * p;
+    if (photo) g.drawImage(photo, x, y, w, h); else { g.fillStyle = '#e4e6ea'; g.fillRect(x, y, w, h); }
+    g.strokeRect(x - lw / 2, y - lw / 2, w + lw, h + lw);   // Schnittkante
+  }
+  return {canvas: c, L};
+}
+
+let prevTimer = 0;
+function scheduleSheetPreview() { clearTimeout(prevTimer); prevTimer = setTimeout(updateSheetPreview, 120); }
+function updateSheetPreview() {
+  const L = sheetLayout(), dpr = window.devicePixelRatio || 1;
+  const p = Math.min(250 / L.PW, 210 / L.PH) * dpr;
+  const {canvas} = renderSheet(p, img ? renderSingle(Math.max(72, p * 25.4 * 1.5)) : null);
+  const pv = $('sheetPreview');
+  pv.width = canvas.width; pv.height = canvas.height; pv.style.width = canvas.width / dpr + 'px';
+  pv.getContext('2d').drawImage(canvas, 0, 0);
+  const n = L.cols * L.rows;
+  $('sheetInfo').textContent = n ? `${n} Fotos · ${L.cols} × ${L.rows} · ${fmtNum(L.PW / 10)} × ${fmtNum(L.PH / 10)} cm` : 'Foto ist größer als dieses Papier';
+  $('dlSheet').disabled = $('printSheet').disabled = !img || !n;
+}
+$('paper').addEventListener('change', updateSheetPreview);
+
+// JPG mit DPI im JFIF-Kopf, damit Drucker und Labor die mm-Größe kennen
+function jpegWithDpi(canvas, dpi) {
+  return new Promise(res => canvas.toBlob(async blob => {
+    const b = new Uint8Array(await blob.arrayBuffer());
+    const hi = dpi >> 8, lo = dpi & 255;
+    const isJfif = b[2] === 0xFF && b[3] === 0xE0 && String.fromCharCode(...b.slice(6, 11)) === 'JFIF\0';
+    let out;
+    if (isJfif) {
+      out = b; out[13] = 1; out[14] = hi; out[15] = lo; out[16] = hi; out[17] = lo;
+    } else {
+      const app0 = [0xFF,0xE0,0,16,0x4A,0x46,0x49,0x46,0,1,1,1,hi,lo,hi,lo,0,0];
+      out = new Uint8Array(b.length + app0.length);
+      out.set(b.slice(0, 2)); out.set(app0, 2); out.set(b.slice(2), 2 + app0.length);
+    }
+    res(new Blob([out], {type:'image/jpeg'}));
+  }, 'image/jpeg', .95));
+}
+async function download(canvas, dpi, name) {
+  const blob = await jpegWithDpi(canvas, dpi);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast(`Gespeichert: ${name}`);
+}
+const baseName = () => `passbild_${fmtNum(fmt.w)}x${fmtNum(fmt.h)}mm`;
+
+$('dlSingle').onclick = () => {
+  if (!img) return;
+  const dpi = +$('dpi').value;
+  download(renderSingle(dpi), dpi, `${baseName()}_${dpi}dpi.jpg`);
+};
+$('dlSheet').onclick = () => {
+  if (!img) return;
+  const dpi = +$('dpi').value;
+  const {canvas, L} = renderSheet(dpi / 25.4, renderSingle(dpi));
+  download(canvas, dpi, `${baseName()}_bogen_${L.PW}x${L.PH}mm_${dpi}dpi.jpg`);
+};
+$('printSheet').onclick = async () => {
+  if (!img) return;
+  const {canvas, L} = renderSheet(300 / 25.4, renderSingle(300));
+  const url = URL.createObjectURL(await jpegWithDpi(canvas, 300));
+  const fr = document.createElement('iframe');
+  fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(fr);
+  const d = fr.contentDocument;
+  d.open();
+  d.write(`<!doctype html><html><head><style>@page{size:${L.PW}mm ${L.PH}mm;margin:0}html,body{margin:0}img{display:block;width:${L.PW}mm;height:${L.PH}mm}</style></head><body><img src="${url}"></body></html>`);
+  d.close();
+  const im = d.querySelector('img');
+  const go = () => { fr.contentWindow.focus(); fr.contentWindow.print(); setTimeout(() => { fr.remove(); URL.revokeObjectURL(url); }, 60000); };
+  if (im.complete) go(); else im.onload = go;
+};
+
+fmtSel.value = 'eu';
+setFormat({...FORMATS.find(f => f.id === 'eu')});
+})();
+</script>
+</body>
+</html>
